@@ -5,6 +5,8 @@ from scipy.interpolate import CubicSpline
 from PIL import Image
 from IPython.display import clear_output
 import gc
+import time
+
 
 
 ###################################################################################
@@ -18,7 +20,7 @@ import gc
 ###################################################################################
 
 
-def draw_vectorscope_interface(xlims, ylims, Image_resolution=(12, 12)):
+def draw_vectorscope_interface(xlims, ylims, Display_progress, Image_resolution=(12, 12)):
     Grid_hazyness = 0.015
     graph_opacity = 0.025
     Num_vertical_lines = 10
@@ -128,9 +130,10 @@ def draw_vectorscope_interface(xlims, ylims, Image_resolution=(12, 12)):
             additive_result += img_buffer  # Directly add to the existing array 
 
         # Update user on progress
-        clear_output(wait=True)
-        print(f'Sweeping traces progress: {100.0}%')
-        print(f'Drawing interface progress:{round(Sweeping_progress*100, 1)}%')
+        if (Display_progress):
+            clear_output(wait=True)
+            print(f'Sweeping traces progress: {100.0}%')
+            print(f'Drawing interface progress:{round(Sweeping_progress*100, 1)}%')
 
         plt.close('all')
 
@@ -146,8 +149,8 @@ def draw_vectorscope_interface(xlims, ylims, Image_resolution=(12, 12)):
 
 
 
-def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0.04, 0.2, 0.06), beam_width = 2, beam_intensity = 0.1,
-                          save_image = True, Resample_factor = 10, noise_level = 0.025, Osci_sweeps = 10, Resampling_sweeps = 10, Fade_out = True):
+def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0.04, 0.2, 0.06), beam_width = 2, beam_intensity = 0.1, save_image = True, 
+                          Resample_factor = 10, noise_level = 0.025, Osci_sweeps = 10, Resampling_sweeps = 10, Fade_out = True, Benchmarking=False, Display_progress=False):
 
 
     Num_data_points = len(x)
@@ -158,6 +161,17 @@ def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0
     # Initialize the cumulative result array with zeros (set dimensions according to your plot size)
     additive_result = None
     iteration = 1
+    resampling_time = []
+    plotting_time = []
+    image_to_array_time = []
+    summing_time = []
+    total_time = []
+    start_loop_timestamp = 0
+    resampling_timestamp = 0
+    plotting_timestamp = 0
+    image_to_array_timestamp = 0
+    summing_timestamp = 0
+    end_loop_timestamp = 0
     for sweep in range(0, Osci_sweeps):
 
         y_noisy = y + noise_level * np.random.normal(size=x.shape)
@@ -177,6 +191,11 @@ def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0
         deriv_values = np.abs(dydx_exact)
 
         for subsweep in range(0, Resampling_sweeps):
+
+            # Start timer
+            if (Benchmarking):
+                start_loop_timestamp = time.time()
+
             fig, ax = plt.subplots(figsize=Image_resolution, facecolor='#000000')
             ax.set_facecolor('#000000')
 
@@ -204,8 +223,14 @@ def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0
             # Evaluate the resampled points using the cubic spline
             y_resampled = cubic_spline(x_resampled)
 
+            if (Benchmarking):
+                resampling_timestamp = time.time()
+
             # Plot the original noisy data and the resampled points
             plt.scatter(x_resampled, y_resampled, color=phosphor_color, s=beam_width, alpha=beam_intensity)
+
+            if (Benchmarking):
+                plotting_timestamp = time.time()
 
             # Convert the figure to an image buffer (in-memory)
             canvas = FigureCanvas(fig)
@@ -226,6 +251,9 @@ def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0
             # Normalize image buffer to [0, 1]
             img_buffer = img_buffer.astype(np.float32) / 255.0
 
+            if (Benchmarking):
+                image_to_array_timestamp = time.time()
+
             # Initialize additive_result on first iteration
             if additive_result is None:
                 additive_result = img_buffer.copy()  # Initialize with first image
@@ -234,12 +262,33 @@ def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0
             else:
                 additive_result += img_buffer  # Directly add to the existing array 
 
+            if (Benchmarking):
+                summing_timestamp = time.time()
+
             # Update user on progress
-            clear_output(wait=True)
-            print(f'Sweeping traces progress: {round(Sweeping_progress*100, 1)}%')
+            if (Display_progress):
+                clear_output(wait=True)
+                print(f'Sweeping traces progress: {round(Sweeping_progress*100, 1)}%')
 
             # Close before displaying graphs on output cell
             plt.close('all')
+
+            # End loop
+            if (Benchmarking):
+                end_loop_timestamp = time.time()
+                total_time.append(end_loop_timestamp - start_loop_timestamp)
+                resampling_time.append(resampling_timestamp - start_loop_timestamp)
+                plotting_time.append(plotting_timestamp - resampling_timestamp)
+                image_to_array_time.append(image_to_array_timestamp - plotting_timestamp)
+                summing_time.append(summing_timestamp - image_to_array_timestamp)
+
+
+    if(Benchmarking):
+        print(f'\nAverage resampling percentage: {round( 100 * (sum(resampling_time)/len(resampling_time)) / (sum(total_time)/len(total_time)), 1)}%\n')
+        print(f'Average plotting_time percentage: {round(100 * (sum(plotting_time)/len(plotting_time)) / (sum(total_time)/len(total_time)), 1)}%\n')
+        print(f'Average image to array percentage: {round(100 * (sum(image_to_array_time)/len(image_to_array_time)) / (sum(total_time)/len(total_time)), 1)}%\n')
+        print(f'Average summing percentage: {round(100 * (sum(summing_time)/len(summing_time)) / (sum(total_time)/len(total_time)), 1)}%\n')
+
 
     # Delete these large variables since we don't need them anymore
     del image_buffers, img_buffer
@@ -250,7 +299,7 @@ def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0
     #additive_result, _ = add_matrices_in_batches(Matrices_List=image_buffers, batch_size=batch_size, Troubleshooting = False)
 
     # Step 3: Compute interface image separately and then add it to graph
-    additive_result = np.sum([additive_result, draw_vectorscope_interface(xlims=xlims, ylims=ylims, Image_resolution=Image_resolution)], axis=0)
+    additive_result = np.sum([additive_result, draw_vectorscope_interface(xlims=xlims, ylims=ylims, Display_progress=False, Image_resolution=Image_resolution)], axis=0)
 
     # Step 4: Clip values to stay within the valid RGB range (0 to 1)
     additive_result = np.clip(additive_result, 0, 1)
@@ -288,8 +337,8 @@ mu = 0  # Mean
 sigma = 1  # Standard deviation
 gaussian = (10 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-(x - 5 - mu)**2 / (2 * sigma**2))
 
-graph_in_vectorscope (x=x, y=gaussian, Image_resolution = (12, 12), phosphor_color = (0.04, 0.2, 0.06), beam_width = 2, beam_intensity = 0.1,
-                          save_image = True, Resample_factor = 10, noise_level = 0.025, Osci_sweeps = 5, Resampling_sweeps = 10, Fade_out = True)
+graph_in_vectorscope (x=x, y=gaussian, Image_resolution = (24, 24), phosphor_color = (0.04, 0.2, 0.06), beam_width = 2, beam_intensity = 0.1,
+                          save_image = True, Resample_factor = 20, noise_level = 0.025, Osci_sweeps = 5, Resampling_sweeps = 50, Fade_out = True, Benchmarking=True, Display_progress=False)
 
 # Release memory at the end
 gc.collect() 
