@@ -6,6 +6,8 @@ from PIL import Image
 from IPython.display import clear_output
 import gc
 import time
+import cProfile
+import pstats
 
 
 
@@ -27,6 +29,8 @@ def draw_vectorscope_interface(xlims, ylims, Display_progress, Image_resolution=
     Num_horizontal_lines = 10
     interface_sweeps = 200
 
+    fig, ax = plt.subplots(figsize=Image_resolution, facecolor='#000000')
+
 
     # Graphed text parameters
     font = 'monospace'
@@ -44,7 +48,8 @@ def draw_vectorscope_interface(xlims, ylims, Display_progress, Image_resolution=
     additive_result = None
     for sweep in range(0, interface_sweeps):
 
-        fig, ax = plt.subplots(figsize=Image_resolution, facecolor='#000000')
+        # Clear graph from previous loop to paint a new one
+        ax.clear()
 
         # Set fixed x and y limits based on your expected data range
         ax.set_xlim(xlims)  # or whatever range your x-axis should have
@@ -135,7 +140,7 @@ def draw_vectorscope_interface(xlims, ylims, Display_progress, Image_resolution=
             print(f'Sweeping traces progress: {100.0}%')
             print(f'Drawing interface progress:{round(Sweeping_progress*100, 1)}%')
 
-        plt.close('all')
+    plt.close(fig)
 
     # Delete these large variables since we don't need them anymore
     del image_buffers, img_buffer, canvas
@@ -152,6 +157,8 @@ def draw_vectorscope_interface(xlims, ylims, Display_progress, Image_resolution=
 def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0.04, 0.2, 0.06), beam_width = 2, beam_intensity = 0.1, save_image = True, 
                           Resample_factor = 10, noise_level = 0.025, Osci_sweeps = 10, Resampling_sweeps = 10, Fade_out = True, Benchmarking=False, Display_progress=False):
 
+    fig, ax = plt.subplots(figsize=Image_resolution, facecolor='#000000')
+    ax.set_facecolor('#000000')
 
     Num_data_points = len(x)
 
@@ -174,13 +181,15 @@ def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0
     end_loop_timestamp = 0
     for sweep in range(0, Osci_sweeps):
 
+        ax.clear()
+
         y_noisy = y + noise_level * np.random.normal(size=x.shape)
 
         # Cubic Spline Fit
         cubic_spline = CubicSpline(x, y_noisy)
 
         # Interpolating on a denser set of points
-        x_dense = np.linspace(0,len(x), Num_data_points * Resample_factor)
+        x_dense = np.linspace(x.min(), x.max(), Num_data_points * Resample_factor)
         y_interpolated = cubic_spline(x_dense)
 
         # Exact derivative of spline polynomials, but calculated over x_dense
@@ -195,9 +204,6 @@ def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0
             # Start timer
             if (Benchmarking):
                 start_loop_timestamp = time.time()
-
-            fig, ax = plt.subplots(figsize=Image_resolution, facecolor='#000000')
-            ax.set_facecolor('#000000')
 
             # Set fixed x and y limits based on your expected data range
             xlims = [x.min()*0.9, x.max()*1.1]
@@ -270,8 +276,6 @@ def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0
                 clear_output(wait=True)
                 print(f'Sweeping traces progress: {round(Sweeping_progress*100, 1)}%')
 
-            # Close before displaying graphs on output cell
-            plt.close('all')
 
             # End loop
             if (Benchmarking):
@@ -281,6 +285,10 @@ def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0
                 plotting_time.append(plotting_timestamp - resampling_timestamp)
                 image_to_array_time.append(image_to_array_timestamp - plotting_timestamp)
                 summing_time.append(summing_timestamp - image_to_array_timestamp)
+
+
+    # Close before displaying graphs on output cell
+    plt.close(fig)
 
 
     if(Benchmarking):
@@ -329,16 +337,36 @@ def graph_in_vectorscope (x, y, Image_resolution = (12, 12), phosphor_color = (0
 
 
 
+def main():
+    # Gaussian function: mean = 0, standard deviation = 1
 
-# Gaussian function: mean = 0, standard deviation = 1
+    x = np.linspace(0, 10, 100)
+    mu = 0  # Mean
+    sigma = 1  # Standard deviation
+    gaussian = (10 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-(x - 5 - mu)**2 / (2 * sigma**2))
 
-x = np.linspace(0, 10, 100)
-mu = 0  # Mean
-sigma = 1  # Standard deviation
-gaussian = (10 / (sigma * np.sqrt(2 * np.pi))) * np.exp(-(x - 5 - mu)**2 / (2 * sigma**2))
+    graph_in_vectorscope (x=x, y=gaussian, Image_resolution = (24, 24), phosphor_color = (0.04, 0.2, 0.06), beam_width = 2, beam_intensity = 0.5,
+                            save_image = True, Resample_factor = 10, noise_level = 0.025, Osci_sweeps = 5, Resampling_sweeps = 10, Fade_out = True, Benchmarking=True, Display_progress=False)
 
-graph_in_vectorscope (x=x, y=gaussian, Image_resolution = (24, 24), phosphor_color = (0.04, 0.2, 0.06), beam_width = 2, beam_intensity = 0.1,
-                          save_image = True, Resample_factor = 20, noise_level = 0.025, Osci_sweeps = 5, Resampling_sweeps = 50, Fade_out = True, Benchmarking=True, Display_progress=False)
+    # Release memory at the end
+    gc.collect() 
 
-# Release memory at the end
-gc.collect() 
+    return None
+
+
+if __name__ == '__main__':
+    # Step 1: Use cProfile to profile the entire program
+    cProfile.run('main()', filename='profile_output.prof')
+
+    # Step 2: Analyze the profiling data using pstats
+    p = pstats.Stats('profile_output.prof')
+
+    # Sort by cumulative time (time spent in each function including subcalls)
+    p.sort_stats('cumulative')
+
+    # Step 3: Print top 10 function calls that took the most time
+    p.print_stats(10)
+
+    # Step 4: (Optional) Drill down into specific functions
+    # p.print_callers('resampling_function')  # Uncomment to see which functions call resampling_function
+    # p.print_callees('plotting_function')    # Uncomment to see which functions are called by plotting_function
